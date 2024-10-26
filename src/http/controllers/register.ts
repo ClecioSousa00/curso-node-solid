@@ -1,5 +1,7 @@
-import { prisma } from '@/lib/prisma'
-import { hash } from 'bcryptjs'
+import { PrismaUsersRepository } from '@/repositories/prisma/prisma-users-repository'
+import { UserAlreadyExistsError } from '@/use-cases/errors/user-already-exists-error'
+import { RegisterUseCase } from '@/use-cases/register'
+
 import { FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 
@@ -12,31 +14,17 @@ export async function register(request: FastifyRequest, reply: FastifyReply) {
     password: z.string().min(6),
   })
 
+  const { email, name, password } = registerBodySchema.parse(request.body)
   try {
-    const { email, name, password } = registerBodySchema.parse(request.body)
-    console.log('Passed validation')
+    const usersRepository = new PrismaUsersRepository()
+    const registerUserCase = new RegisterUseCase(usersRepository)
 
-    const password_hash = await hash(password, 6)
-
-    const userWithSameEmail = await prisma.user.findUnique({
-      where: {
-        email,
-      },
-    })
-
-    if (userWithSameEmail) return reply.status(409).send()
-
-    await prisma.user.create({
-      data: {
-        name,
-        email,
-        password_hash,
-      },
-    })
-
-    return reply.status(201).send()
+    await registerUserCase.execute({ email, name, password })
   } catch (error) {
-    console.error('Validation error:', error)
-    return reply.status(400).send({ error: error.errors })
+    if (error instanceof UserAlreadyExistsError)
+      return reply.status(409).send({ message: error.message })
+
+    return reply.status(500).send()
   }
+  return reply.status(201).send()
 }
